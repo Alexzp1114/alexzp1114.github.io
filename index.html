@@ -153,13 +153,19 @@ function checkTunnel(url, dotId, labelId, name){
     });
 }
 
+function checkSupervisor(d, superDotId, superLabelId, name){
+  var alive = d && d.ts && ((Date.now()/1000) - d.ts) < 120;
+  setDot(superDotId, alive ? 'dot-online' : 'dot-offline');
+  el(superLabelId).textContent = alive ? name : (name + ' 离线');
+  return alive;
+}
+
 el('status-section').style.display = 'block';
 
 // CANSLIM
 fetch('https://jsonblob.com/api/jsonBlob/'+CANSLIM_JID).then(function(r){return r.json()}).then(function(d){
   if(d && d.url){
-    setDot('canslim-super-dot', 'dot-online');
-    el('canslim-super-label').textContent = 'CANSLIM';
+    checkSupervisor(d, 'canslim-super-dot', 'canslim-super-label', 'CANSLIM');
     checkTunnel(d.url, 'canslim-dot', 'canslim-label', 'CANSLIM');
   }
 }).catch(function(){
@@ -172,8 +178,7 @@ fetch('https://jsonblob.com/api/jsonBlob/'+CANSLIM_JID).then(function(r){return 
 // ETF
 fetch('https://jsonblob.com/api/jsonBlob/'+ETF_JID).then(function(r){return r.json()}).then(function(d){
   if(d && d.url){
-    setDot('etf-super-dot', 'dot-online');
-    el('etf-super-label').textContent = '宽基ETF';
+    checkSupervisor(d, 'etf-super-dot', 'etf-super-label', '宽基ETF');
     checkTunnel(d.url, 'etf-dot', 'etf-label', '宽基ETF');
   }
 }).catch(function(){
