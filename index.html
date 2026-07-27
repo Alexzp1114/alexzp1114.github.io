@@ -153,10 +153,23 @@ function checkTunnel(url, dotId, labelId, name){
     });
 }
 
+function ageText(ts){
+  if(!ts) return '';
+  var sec = Math.floor(Date.now()/1000 - ts);
+  if(sec < 60) return sec+'s前';
+  if(sec < 3600) return Math.floor(sec/60)+'m前';
+  return Math.floor(sec/3600)+'h前';
+}
+
 function checkSupervisor(d, superDotId, superLabelId, name){
   var alive = d && d.ts && ((Date.now()/1000) - d.ts) < 120;
+  var ts = d && d.ts ? d.ts : 0;
+  var tsStr = ts ? new Date(ts*1000).toTimeString().slice(0,5) : '';
+  var age = alive ? ageText(ts) : '';
   setDot(superDotId, alive ? 'dot-online' : 'dot-offline');
-  el(superLabelId).textContent = alive ? name : (name + ' 离线');
+  el(superLabelId).innerHTML = alive
+    ? name + ' <span style=\"font-size:0.7rem;color:#64748b\">' + tsStr + ' · ' + age + '</span>'
+    : (name + ' <span style=\"font-size:0.7rem;color:#ef4444\">离线</span>');
   return alive;
 }
 
