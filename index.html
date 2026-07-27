@@ -168,8 +168,8 @@ function checkSupervisor(d, superDotId, superLabelId, name){
   var age = alive ? ageText(ts) : '';
   setDot(superDotId, alive ? 'dot-online' : 'dot-offline');
   el(superLabelId).innerHTML = alive
-    ? '<span class=\"name-tag\" style=\"display:inline-block;min-width:56px\">' + name + '</span><span style=\"font-size:0.7rem;color:#64748b\">' + tsStr + ' · ' + age + '</span>'
-    : ('<span class=\"name-tag\" style=\"display:inline-block;min-width:56px\">' + name + '</span><span style=\"font-size:0.7rem;color:#ef4444\">离线</span>');
+    ? '<span class=\"name-tag\" style=\"display:inline-block;min-width:64px\">' + name + '</span><span style=\"font-size:0.7rem;color:#64748b\">' + tsStr + ' · ' + age + '</span>'
+    : ('<span class=\"name-tag\" style=\"display:inline-block;min-width:64px\">' + name + '</span><span style=\"font-size:0.7rem;color:#ef4444\">离线</span>');
   return alive;
 }
 
