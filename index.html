@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Alex 的工具箱</title>
+<style>
+*{margin:0;padding:0;box-sizing:border-box;user-select:none}
+body{
+  font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;
+  display:flex;justify-content:center;align-items:flex-start;
+  min-height:100vh;padding-top:12vh;cursor:default;
+  background:linear-gradient(180deg,#0f172a 0%,#1e293b 100%);
+  color:#e2e8f0
+}
+
+.card{
+  background:#1e293b;
+  border:1px solid #334155;
+  border-radius:16px;
+  padding:36px 32px 28px;
+  text-align:center;
+  max-width:380px;width:90vw;
+  box-shadow:0 8px 32px rgba(0,0,0,.4),0 0 0 1px rgba(255,255,255,.03);
+}
+
+.title-row{display:flex;align-items:center;justify-content:center;gap:8px;margin-bottom:6px}
+.title-row .icon{font-size:1.5rem}
+h1{font-size:1.5rem;font-weight:700;color:#f1f5f9}
+.subtitle{font-size:.78rem;color:#64748b;margin-bottom:26px;letter-spacing:.3px}
+
+.btn{
+  display:flex;align-items:center;gap:10px;
+  padding:16px 20px;margin:10px 0;border-radius:10px;
+  text-decoration:none;font-size:.95rem;font-weight:600;
+  transition:transform .15s,box-shadow .15s,filter .15s
+}
+.btn:hover{transform:translateY(-2px);filter:brightness(1.1)}
+.btn .btn-emoji{font-size:1.2rem;flex-shrink:0}
+.btn .btn-text{flex:1;text-align:left}
+.btn .btn-arrow{opacity:.5;font-size:.85rem;transition:opacity .15s,transform .15s}
+.btn:hover .btn-arrow{opacity:1;transform:translateX(2px)}
+
+.canslim{
+  background:#dc2626 !important;color:#fff !important;
+  box-shadow:0 4px 16px rgba(220,38,38,.35)
+}
+.etf{
+  background:linear-gradient(135deg,#7c3aed,#6d28d9);
+  color:#fff;box-shadow:0 4px 16px rgba(124,58,237,.25)
+}
+
+.status-bar{
+  margin-top:24px;padding-top:18px;
+  border-top:1px solid #334155;text-align:left
+}
+.status-section-hdr{
+  font-size:.6rem;font-weight:600;color:#475569;
+  text-transform:uppercase;letter-spacing:1.2px;
+  margin:8px 0 6px 0
+}
+.status-row{
+  display:flex;align-items:center;gap:8px;
+  margin:6px 0;font-size:.75rem;color:#94a3b8;
+  white-space:nowrap;padding:4px 8px;
+  border-radius:6px;transition:background .2s
+}
+.status-row:hover{background:rgba(255,255,255,.03)}
+.status-dot{width:7px;height:7px;border-radius:50%;flex-shrink:0}
+.dot-online{background:#22c55e;box-shadow:0 0 8px rgba(34,197,94,.5)}
+.dot-offline{background:#ef4444;box-shadow:0 0 8px rgba(239,68,68,.4)}
+.dot-checking{background:#f59e0b;animation:pulse 1.2s infinite}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.3}}
+.status-label{flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+.status-label a{display:inline;color:#38bdf8;text-decoration:none;font-size:inherit}
+.status-label a:hover{text-decoration:underline}
+.name-tag{display:inline-block;min-width:64px}
+
+.footer{
+  text-align:center;font-size:.65rem;color:#475569;
+  margin-top:8px;padding-top:8px
+}
+</style>
+</head>
+<body>
+<div class="card">
+  <h1>Alex 的工具箱</h1>
+
+  <a class="btn cansim" href="/canslim/" style="background:#ef4444;color:#fff">
+    <span class="btn-emoji">📈</span>
+    <span class="btn-text">CANSLIM 选股分析</span>
+    <span class="btn-arrow">→</span>
+  </a>
+  <a class="btn etf" href="/etf/">
+    <span class="btn-emoji">📊</span>
+    <span class="btn-text">宽基ETF份额追踪</span>
+    <span class="btn-arrow">→</span>
+  </a>
+
+  <div class="status-bar" id="status-section" style="display:none">
+    <div class="status-section-hdr">隧道在线</div>
+    <div class="status-row">
+      <div class="status-dot dot-checking" id="canslim-dot"></div>
+      <span class="status-label" id="canslim-label">检测中...</span>
+    </div>
+    <div class="status-row">
+      <div class="status-dot dot-checking" id="etf-dot"></div>
+      <span class="status-label" id="etf-label">检测中...</span>
+    </div>
+    <div class="status-section-hdr">守护者</div>
+    <div class="status-row">
+      <div class="status-dot dot-checking" id="canslim-super-dot"></div>
+      <span class="status-label" id="canslim-super-label">CANSLIM</span>
+    </div>
+    <div class="status-row">
+      <div class="status-dot dot-checking" id="etf-super-dot"></div>
+      <span class="status-label" id="etf-super-label">宽基ETF</span>
+    </div>
+  </div>
+</div>
+<script>
+(function(){
+var CANSLIM_JID = '019fa1ea-ac9b-7fe2-9722-2bde48f04c23';
+var ETF_JID = '019fa1df-073e-7928-8794-a3ad9563df49';
+
+function el(id){return document.getElementById(id)}
+
+function setDot(id, cls){
+  var d = el(id); if(!d) return;
+  d.className = 'status-dot ' + cls;
+}
+
+function shortHost(url){
+  var h = url.replace('https://','').replace('http://','').split('.')[0];
+  return h.length > 10 ? h.slice(0,10)+'...' : h;
+}
+
+function checkTunnel(url, dotId, labelId, name){
+  setDot(dotId, 'dot-checking');
+  var host = shortHost(url);
+  el(labelId).textContent = host;
+
+  var ctrl = new AbortController();
+  setTimeout(function(){ ctrl.abort() }, 6000);
+  fetch(url, {mode: 'no-cors', signal: ctrl.signal})
+    .then(function(){
+      setDot(dotId, 'dot-online');
+      el(labelId).innerHTML = '<span class="name-tag">'+name+'</span> <a href="'+url+'" target="_blank">'+host+'</a>';
+    })
+    .catch(function(){
+      setDot(dotId, 'dot-offline');
+      el(labelId).textContent = name+' 离线';
+    });
+}
+
+el('status-section').style.display = 'block';
+
+// CANSLIM
+fetch('https://jsonblob.com/api/jsonBlob/'+CANSLIM_JID).then(function(r){return r.json()}).then(function(d){
+  if(d && d.url){
+    setDot('canslim-super-dot', 'dot-online');
+    el('canslim-super-label').textContent = 'CANSLIM';
+    checkTunnel(d.url, 'canslim-dot', 'canslim-label', 'CANSLIM');
+  }
+}).catch(function(){
+  setDot('canslim-dot', 'dot-offline');
+  el('canslim-label').textContent = 'CANSLIM 离线';
+  setDot('canslim-super-dot', 'dot-offline');
+  el('canslim-super-label').textContent = 'CANSLIM 离线';
+});
+
+// ETF
+fetch('https://jsonblob.com/api/jsonBlob/'+ETF_JID).then(function(r){return r.json()}).then(function(d){
+  if(d && d.url){
+    setDot('etf-super-dot', 'dot-online');
+    el('etf-super-label').textContent = '宽基ETF';
+    checkTunnel(d.url, 'etf-dot', 'etf-label', '宽基ETF');
+  }
+}).catch(function(){
+  setDot('etf-dot', 'dot-offline');
+  el('etf-label').textContent = '宽基ETF 离线';
+  setDot('etf-super-dot', 'dot-offline');
+  el('etf-super-label').textContent = 'ETF 离线';
+});
+})();
+</script>
+</body>
+</html>
