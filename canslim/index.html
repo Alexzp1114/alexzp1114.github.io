@@ -19,7 +19,7 @@ var done=false;
 function go(u){if(done||!u)return;done=true;location.replace(u);}
 
 // jsonblob 动态读取隧道 URL
-fetch('https://jsonblob.com/api/jsonBlob/019fa887-89f3-7d57-8ff0-5fbd872a7a2e')
+fetch('https://jsonblob.com/api/jsonBlob/019faaba-0503-7371-8301-45d7d98409b2')
 .then(function(r){return r.json()}).then(function(d){go(d.url)}).catch(function(){});
 // 2 秒兜底 → config.json
 setTimeout(function(){
