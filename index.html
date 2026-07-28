@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>Alex 的工具箱</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80'>🔧</text></svg>">
 <style>
 *{margin:0;padding:0;box-sizing:border-box;user-select:none}
 body{
@@ -120,8 +121,8 @@ h1{font-size:1.5rem;font-weight:700;color:#f1f5f9}
 </div>
 <script>
 (function(){
-var CANSLIM_JID = '019fa1ea-ac9b-7fe2-9722-2bde48f04c23';
-var ETF_JID = '019fa1df-073e-7928-8794-a3ad9563df49';
+var CANSLIM_JID = '019fa887-89f3-7d57-8ff0-5fbd872a7a2e';
+var ETF_JID = '019fa886-07dc-73da-9d65-8a1e661870d8';
 
 function el(id){return document.getElementById(id)}
 
@@ -153,13 +154,32 @@ function checkTunnel(url, dotId, labelId, name){
     });
 }
 
+function ageText(ts){
+  if(!ts) return '';
+  var sec = Math.floor(Date.now()/1000 - ts);
+  if(sec < 60) return sec+'s前';
+  if(sec < 3600) return Math.floor(sec/60)+'m前';
+  return Math.floor(sec/3600)+'h前';
+}
+
+function checkSupervisor(d, superDotId, superLabelId, name){
+  var alive = d && d.ts && ((Date.now()/1000) - d.ts) < 120;
+  var ts = d && d.ts ? d.ts : 0;
+  var tsStr = ts ? new Date(ts*1000).toTimeString().slice(0,5) : '';
+  var age = alive ? ageText(ts) : '';
+  setDot(superDotId, alive ? 'dot-online' : 'dot-offline');
+  el(superLabelId).innerHTML = alive
+    ? '<span class=\"name-tag\" style=\"display:inline-block;min-width:64px\">' + name + '</span><span style=\"font-size:0.7rem;color:#64748b\">' + tsStr + ' · ' + age + '</span>'
+    : ('<span class=\"name-tag\" style=\"display:inline-block;min-width:64px\">' + name + '</span><span style=\"font-size:0.7rem;color:#ef4444\">离线</span>');
+  return alive;
+}
+
 el('status-section').style.display = 'block';
 
 // CANSLIM
 fetch('https://jsonblob.com/api/jsonBlob/'+CANSLIM_JID).then(function(r){return r.json()}).then(function(d){
   if(d && d.url){
-    setDot('canslim-super-dot', 'dot-online');
-    el('canslim-super-label').textContent = 'CANSLIM';
+    checkSupervisor(d, 'canslim-super-dot', 'canslim-super-label', 'CANSLIM');
     checkTunnel(d.url, 'canslim-dot', 'canslim-label', 'CANSLIM');
   }
 }).catch(function(){
@@ -172,8 +192,7 @@ fetch('https://jsonblob.com/api/jsonBlob/'+CANSLIM_JID).then(function(r){return 
 // ETF
 fetch('https://jsonblob.com/api/jsonBlob/'+ETF_JID).then(function(r){return r.json()}).then(function(d){
   if(d && d.url){
-    setDot('etf-super-dot', 'dot-online');
-    el('etf-super-label').textContent = '宽基ETF';
+    checkSupervisor(d, 'etf-super-dot', 'etf-super-label', '宽基ETF');
     checkTunnel(d.url, 'etf-dot', 'etf-label', '宽基ETF');
   }
 }).catch(function(){

@@ -4,6 +4,7 @@
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
 <title>CANSLIM</title>
+<link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80'>📈</text></svg>">
 <style>
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:#0f172a;color:#e2e8f0}
 .container{text-align:center;max-width:400px;padding:20px}
@@ -18,7 +19,7 @@ var done=false;
 function go(u){if(done||!u)return;done=true;location.replace(u);}
 
 // jsonblob 动态读取隧道 URL
-fetch('https://jsonblob.com/api/jsonBlob/019fa1ea-ac9b-7fe2-9722-2bde48f04c23')
+fetch('https://jsonblob.com/api/jsonBlob/019fa887-89f3-7d57-8ff0-5fbd872a7a2e')
 .then(function(r){return r.json()}).then(function(d){go(d.url)}).catch(function(){});
 // 2 秒兜底 → config.json
 setTimeout(function(){
