@@ -157,9 +157,7 @@ function checkTunnel(url, dotId, labelId, name){
 function ageText(ts){
   if(!ts) return '';
   var sec = Math.floor(Date.now()/1000 - ts);
-  if(sec < 60) return sec+'s前';
-  if(sec < 3600) return Math.floor(sec/60)+'m前';
-  return Math.floor(sec/3600)+'h前';
+  return sec+'s前';
 }
 
 function checkSupervisor(d, superDotId, superLabelId, name){
