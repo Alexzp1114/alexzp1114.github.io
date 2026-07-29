@@ -18,8 +18,9 @@ p{font-size:.85rem;color:#94a3b8;margin:6px 0 0}
 var done=false;
 function go(u){if(done||!u)return;done=true;location.replace(u);}
 
-// jsonblob 动态读取隧道 URL → 代理路由
-fetch('https://jsonblob.com/api/jsonBlob/019fa1df-073e-7928-8794-a3ad9563df49')
+var ETF_JID = '019fa886-07dc-73da-9d65-8a1e661870d8';
+// jsonblob 动态读取隧道 URL
+fetch('https://jsonblob.com/api/jsonBlob/'+ETF_JID)
 .then(function(r){return r.json()}).then(function(d){
   go(d.url);
 }).catch(function(){});
