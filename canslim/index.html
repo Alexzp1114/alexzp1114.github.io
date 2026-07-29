@@ -18,8 +18,9 @@ p{font-size:.85rem;color:#94a3b8;margin:6px 0 0}
 var done=false;
 function go(u){if(done||!u)return;done=true;location.replace(u);}
 
+var CANSLIM_JID = '019faaba-0503-7371-8301-45d7d98409b2';
 // jsonblob 动态读取隧道 URL
-fetch('https://jsonblob.com/api/jsonBlob/019faaba-0503-7371-8301-45d7d98409b2')
+fetch('https://jsonblob.com/api/jsonBlob/'+CANSLIM_JID)
 .then(function(r){return r.json()}).then(function(d){go(d.url)}).catch(function(){});
 // 2 秒兜底 → config.json
 setTimeout(function(){
