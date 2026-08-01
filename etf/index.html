@@ -19,18 +19,30 @@ var done=false;
 function go(u){if(done||!u)return;done=true;location.replace(u);}
 
 var ETF_JID = '019fb7fc-4c93-7a24-884e-7cbcac4ce14e';
-// jsonblob 动态读取隧道 URL
-fetch('https://jsonblob.com/api/jsonBlob/'+ETF_JID)
-.then(function(r){return r.json()}).then(function(d){
-  go(d.url);
-}).catch(function(){});
-// 2 秒兜底 → config.json
-setTimeout(function(){
-fetch('config.json').then(function(r){return r.json()}).then(function(d){go(d.url)})
-.catch(function(){
-document.querySelector('.container').innerHTML='<h1>ETF 份额追踪</h1><p>服务暂不可用</p>';
+
+// 双通道：jsonblob（快）+ config.json（兜底），谁先返回有效 URL 用谁
+function fetchUrl(jid){
+  return new Promise(function(resolve){
+    var got = false;
+    function done(u){ if(got) return; got = true; resolve(u); }
+    var ctrl = new AbortController();
+    setTimeout(function(){ ctrl.abort(); }, 3000);
+    fetch('https://jsonblob.com/api/jsonBlob/'+jid, {signal:ctrl.signal})
+      .then(function(r){ return r.json(); })
+      .then(function(d){ if(d && d.url) done(d.url); })
+      .catch(function(){});
+    fetch('config.json')
+      .then(function(r){ return r.json(); })
+      .then(function(d){ if(d && d.url) done(d.url); })
+      .catch(function(){});
+    setTimeout(function(){ done(null); }, 3500); // 防呆兜底
+  });
+}
+
+fetchUrl(ETF_JID).then(function(u){
+  if(u){ go(u); return; }
+  document.querySelector('.container').innerHTML='<h1>ETF 份额追踪</h1><p>服务暂不可用</p>';
 });
-},2000);
 })();
 </script>
 </head>
