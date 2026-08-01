@@ -121,7 +121,7 @@ h1{font-size:1.5rem;font-weight:700;color:#f1f5f9}
 </div>
 <script>
 (function(){
-var CANSLIM_JID = '019fba30-d686-72e6-a1ab-fa173a0debd7';
+var CANSLIM_JID = '019fb508-fa98-7260-a330-b6aedb1999ee';
 var ETF_JID = '019fb7fc-4c93-7a24-884e-7cbcac4ce14e';
 
 function el(id){return document.getElementById(id)}
@@ -161,7 +161,7 @@ function ageText(ts){
 }
 
 function checkSupervisor(d, superDotId, superLabelId, name){
-  var alive = d && d.ts && ((Date.now()/1000) - d.ts) < 120;
+  var alive = d && d.ts && ((Date.now()/1000) - d.ts) < 150;
   var ts = d && d.ts ? d.ts : 0;
   var tsStr = ts ? new Date(ts*1000).toTimeString().slice(0,5) : '';
   var age = alive ? ageText(ts) : '';
