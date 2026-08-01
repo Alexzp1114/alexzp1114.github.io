@@ -121,8 +121,12 @@ h1{font-size:1.5rem;font-weight:700;color:#f1f5f9}
 </div>
 <script>
 (function(){
-var CANSLIM_JID = '019fb508-fa98-7260-a330-b6aedb1999ee';
+// ===== 配置 =====
+var CANSLIM_JID = '019fba30-d686-72e6-a1ab-fa173a0debd7'; // 当前活跃 blob
 var ETF_JID = '019fb7fc-4c93-7a24-884e-7cbcac4ce14e';
+var FETCH_TIMEOUT = 3000;   // blob/config 3s 超时
+var PROBE_TIMEOUT = 3000;   // 隧道探测 3s 超时
+var POLL_MS = 30000;        // 30s 轮询
 
 function el(id){return document.getElementById(id)}
 
@@ -136,22 +140,38 @@ function shortHost(url){
   return h.length > 10 ? h.slice(0,10)+'...' : h;
 }
 
-function checkTunnel(url, dotId, labelId, name){
-  setDot(dotId, 'dot-checking');
-  var host = shortHost(url);
-  el(labelId).textContent = host;
-
+// 带超时的 fetch
+function fetchTimeout(url, ms){
   var ctrl = new AbortController();
-  setTimeout(function(){ ctrl.abort() }, 6000);
-  fetch(url, {mode: 'no-cors', signal: ctrl.signal})
-    .then(function(){
-      setDot(dotId, 'dot-online');
-      el(labelId).innerHTML = '<span class="name-tag">'+name+'</span> <a href="'+url+'" target="_blank">'+host+'</a>';
-    })
-    .catch(function(){
-      setDot(dotId, 'dot-offline');
-      el(labelId).textContent = name+' 离线';
-    });
+  var t = setTimeout(function(){ ctrl.abort() }, ms);
+  return fetch(url, {signal: ctrl.signal}).then(function(r){
+    clearTimeout(t);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    return r.json();
+  }, function(e){ clearTimeout(t); throw e; });
+}
+
+// localStorage 缓存（秒出用）
+function saveState(name, d){
+  try{ localStorage.setItem('toolbox_'+name, JSON.stringify({url:d.url, ts:d.ts||0, at:Date.now()})); }catch(e){}
+}
+function loadState(name){
+  try{ return JSON.parse(localStorage.getItem('toolbox_'+name)); }catch(e){ return null; }
+}
+
+// 双通道：jsonblob（快） + config.json（兜底），谁先返回有效数据用谁
+function fetchAppState(jid, cfgPath){
+  return new Promise(function(resolve){
+    var got = false;
+    function done(d){ if(got) return; got = true; resolve(d); }
+    fetchTimeout('https://jsonblob.com/api/jsonBlob/'+jid, FETCH_TIMEOUT)
+      .then(function(d){ if(d && d.url) done({url:d.url, ts:d.ts||0}); })
+      .catch(function(){});
+    fetchTimeout(cfgPath, FETCH_TIMEOUT)
+      .then(function(d){ if(d && d.url) done({url:d.url, ts:d.ts||0}); })
+      .catch(function(){});
+    setTimeout(function(){ done(null); }, FETCH_TIMEOUT + 500); // 防呆兜底
+  });
 }
 
 function ageText(ts){
@@ -160,45 +180,61 @@ function ageText(ts){
   return sec+'s前';
 }
 
-function checkSupervisor(d, superDotId, superLabelId, name){
+// 渲染单个应用的状态（隧道 + 守护者）
+function renderApp(name, d, ids){
+  var tunnelDot = ids[0], tunnelLabel = ids[1], superDot = ids[2], superLabel = ids[3];
   var alive = d && d.ts && ((Date.now()/1000) - d.ts) < 150;
   var ts = d && d.ts ? d.ts : 0;
   var tsStr = ts ? new Date(ts*1000).toTimeString().slice(0,5) : '';
   var age = alive ? ageText(ts) : '';
-  setDot(superDotId, alive ? 'dot-online' : 'dot-offline');
-  el(superLabelId).innerHTML = alive
-    ? '<span class=\"name-tag\" style=\"display:inline-block;min-width:64px\">' + name + '</span><span style=\"font-size:0.7rem;color:#64748b\">' + tsStr + ' · ' + age + '</span>'
-    : ('<span class=\"name-tag\" style=\"display:inline-block;min-width:64px\">' + name + '</span><span style=\"font-size:0.7rem;color:#ef4444\">离线</span>');
-  return alive;
+
+  // 守护者行
+  setDot(superDot, d ? (alive ? 'dot-online' : 'dot-offline') : 'dot-offline');
+  el(superLabel).innerHTML = d && alive
+    ? '<span class="name-tag" style="display:inline-block;min-width:64px">' + name + '</span><span style="font-size:0.7rem;color:#64748b">' + tsStr + ' · ' + age + '</span>'
+    : ('<span class="name-tag" style="display:inline-block;min-width:64px">' + name + '</span><span style="font-size:0.7rem;color:#ef4444">' + (d ? '离线' : '未知') + '</span>');
+
+  // 隧道行
+  if(d && d.url){
+    setDot(tunnelDot, 'dot-checking');
+    el(tunnelLabel).textContent = shortHost(d.url);
+    var ctrl = new AbortController();
+    setTimeout(function(){ ctrl.abort() }, PROBE_TIMEOUT);
+    fetch(d.url, {mode:'no-cors', signal:ctrl.signal})
+      .then(function(){
+        setDot(tunnelDot, 'dot-online');
+        el(tunnelLabel).innerHTML = '<span class="name-tag">'+name+'</span> <a href="'+d.url+'" target="_blank">'+shortHost(d.url)+'</a>';
+      })
+      .catch(function(){
+        setDot(tunnelDot, 'dot-offline');
+        el(tunnelLabel).textContent = name+' 离线';
+      });
+  } else {
+    setDot(tunnelDot, 'dot-offline');
+    el(tunnelLabel).textContent = name+' 离线';
+  }
+}
+
+function refresh(name, jid, cfgPath, ids){
+  fetchAppState(jid, cfgPath).then(function(d){
+    if(d) saveState(name.toLowerCase(), d);
+    renderApp(name, d || loadState(name.toLowerCase()), ids);
+  });
 }
 
 el('status-section').style.display = 'block';
 
-// CANSLIM
-fetch('https://jsonblob.com/api/jsonBlob/'+CANSLIM_JID).then(function(r){return r.json()}).then(function(d){
-  if(d && d.url){
-    checkSupervisor(d, 'canslim-super-dot', 'canslim-super-label', 'CANSLIM');
-    checkTunnel(d.url, 'canslim-dot', 'canslim-label', 'CANSLIM');
-  }
-}).catch(function(){
-  setDot('canslim-dot', 'dot-offline');
-  el('canslim-label').textContent = 'CANSLIM 离线';
-  setDot('canslim-super-dot', 'dot-offline');
-  el('canslim-super-label').textContent = 'CANSLIM 离线';
-});
+// ===== 秒出：先渲染上次缓存 =====
+renderApp('CANSLIM', loadState('canslim'), ['canslim-dot','canslim-label','canslim-super-dot','canslim-super-label']);
+renderApp('宽基ETF', loadState('etf'), ['etf-dot','etf-label','etf-super-dot','etf-super-label']);
 
-// ETF
-fetch('https://jsonblob.com/api/jsonBlob/'+ETF_JID).then(function(r){return r.json()}).then(function(d){
-  if(d && d.url){
-    checkSupervisor(d, 'etf-super-dot', 'etf-super-label', '宽基ETF');
-    checkTunnel(d.url, 'etf-dot', 'etf-label', '宽基ETF');
-  }
-}).catch(function(){
-  setDot('etf-dot', 'dot-offline');
-  el('etf-label').textContent = '宽基ETF 离线';
-  setDot('etf-super-dot', 'dot-offline');
-  el('etf-super-label').textContent = 'ETF 离线';
-});
+// ===== 立即检测 + 30s 轮询 =====
+refresh('CANSLIM', CANSLIM_JID, 'canslim/config.json', ['canslim-dot','canslim-label','canslim-super-dot','canslim-super-label']);
+refresh('宽基ETF', ETF_JID, 'etf/config.json', ['etf-dot','etf-label','etf-super-dot','etf-super-label']);
+setInterval(function(){
+  refresh('CANSLIM', CANSLIM_JID, 'canslim/config.json', ['canslim-dot','canslim-label','canslim-super-dot','canslim-super-label']);
+  refresh('宽基ETF', ETF_JID, 'etf/config.json', ['etf-dot','etf-label','etf-super-dot','etf-super-label']);
+}, POLL_MS);
 })();
 </script>
 </body>
