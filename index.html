@@ -151,12 +151,17 @@ function fetchTimeout(url, ms){
   }, function(e){ clearTimeout(t); throw e; });
 }
 
-// localStorage 缓存（秒出用）
+// localStorage 缓存（秒出用；超过 10 分钟视为过期，避免旧状态闪烁）
+var CACHE_TTL = 10*60*1000;
 function saveState(name, d){
   try{ localStorage.setItem('toolbox_'+name, JSON.stringify({url:d.url, ts:d.ts||0, at:Date.now()})); }catch(e){}
 }
 function loadState(name){
-  try{ return JSON.parse(localStorage.getItem('toolbox_'+name)); }catch(e){ return null; }
+  try{
+    var c = JSON.parse(localStorage.getItem('toolbox_'+name));
+    if(c && (Date.now() - (c.at||0)) < CACHE_TTL) return c;
+    return null;
+  }catch(e){ return null; }
 }
 
 // 双通道：jsonblob（快） + config.json（兜底），谁先返回有效数据用谁
@@ -183,16 +188,20 @@ function ageText(ts){
 // 渲染单个应用的状态（隧道 + 守护者）
 function renderApp(name, d, ids){
   var tunnelDot = ids[0], tunnelLabel = ids[1], superDot = ids[2], superLabel = ids[3];
-  var alive = d && d.ts && ((Date.now()/1000) - d.ts) < 150;
+  var now = Date.now()/1000;
+  var alive = d && d.ts && ((now - d.ts) < 150);   // 守护者在线只看 ts 新鲜度
+  var hasTs  = d && d.ts ? true : false;           // 有无心跳时间戳
   var ts = d && d.ts ? d.ts : 0;
   var tsStr = ts ? new Date(ts*1000).toTimeString().slice(0,5) : '';
   var age = alive ? ageText(ts) : '';
 
-  // 守护者行
-  setDot(superDot, d ? (alive ? 'dot-online' : 'dot-offline') : 'dot-offline');
-  el(superLabel).innerHTML = d && alive
-    ? '<span class="name-tag" style="display:inline-block;min-width:64px">' + name + '</span><span style="font-size:0.7rem;color:#64748b">' + tsStr + ' · ' + age + '</span>'
-    : ('<span class="name-tag" style="display:inline-block;min-width:64px">' + name + '</span><span style="font-size:0.7rem;color:#ef4444">' + (d ? '离线' : '未知') + '</span>');
+  // 守护者行：有 ts → 按新鲜度判在线/离线；无 ts（config 兜底）→ 显示"心跳中"等待 jsonblob
+  setDot(superDot, hasTs ? (alive ? 'dot-online' : 'dot-offline') : 'dot-checking');
+  el(superLabel).innerHTML = hasTs
+    ? (alive
+        ? '<span class="name-tag" style="display:inline-block;min-width:64px">' + name + '</span><span style="font-size:0.7rem;color:#64748b">' + tsStr + ' · ' + age + '</span>'
+        : '<span class="name-tag" style="display:inline-block;min-width:64px">' + name + '</span><span style="font-size:0.7rem;color:#ef4444">离线</span>')
+    : ('<span class="name-tag" style="display:inline-block;min-width:64px">' + name + '</span><span style="font-size:0.7rem;color:#f59e0b">心跳中</span>');
 
   // 隧道行
   if(d && d.url){
