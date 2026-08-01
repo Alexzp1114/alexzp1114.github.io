@@ -179,11 +179,6 @@ fetch('https://jsonblob.com/api/jsonBlob/'+CANSLIM_JID).then(function(r){return 
   if(d && d.url){
     checkSupervisor(d, 'canslim-super-dot', 'canslim-super-label', 'CANSLIM');
     checkTunnel(d.url, 'canslim-dot', 'canslim-label', 'CANSLIM');
-  } else {
-    setDot('canslim-dot', 'dot-offline');
-    el('canslim-label').textContent = 'CANSLIM 离线';
-    setDot('canslim-super-dot', 'dot-offline');
-    el('canslim-super-label').textContent = 'CANSLIM 离线';
   }
 }).catch(function(){
   setDot('canslim-dot', 'dot-offline');
@@ -197,11 +192,6 @@ fetch('https://jsonblob.com/api/jsonBlob/'+ETF_JID).then(function(r){return r.js
   if(d && d.url){
     checkSupervisor(d, 'etf-super-dot', 'etf-super-label', '宽基ETF');
     checkTunnel(d.url, 'etf-dot', 'etf-label', '宽基ETF');
-  } else {
-    setDot('etf-dot', 'dot-offline');
-    el('etf-label').textContent = '宽基ETF 离线';
-    setDot('etf-super-dot', 'dot-offline');
-    el('etf-super-label').textContent = 'ETF 离线';
   }
 }).catch(function(){
   setDot('etf-dot', 'dot-offline');
