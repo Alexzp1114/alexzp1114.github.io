@@ -77,6 +77,23 @@ h1{font-size:1.5rem;font-weight:700;color:#f1f5f9}
 .status-label a:hover{text-decoration:underline}
 .name-tag{display:inline-block;min-width:64px}
 
+/* 隧道更换按钮 */
+.rotate-btn{
+  flex-shrink:0;
+  background:rgba(56,189,248,.12);
+  border:1px solid rgba(56,189,248,.35);
+  color:#7dd3fc;
+  font-size:.65rem;line-height:1;
+  padding:4px 8px;border-radius:5px;
+  cursor:pointer;
+  transition:background .15s,transform .15s,opacity .15s;
+  opacity:.85;user-select:none
+}
+.rotate-btn:hover{background:rgba(56,189,248,.25);transform:translateY(-1px);opacity:1}
+.rotate-btn:active{transform:translateY(0)}
+.rotate-btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
+.rotate-btn.sending{background:rgba(245,158,11,.15);border-color:rgba(245,158,11,.4);color:#fbbf24}
+
 .footer{
   text-align:center;font-size:.65rem;color:#475569;
   margin-top:8px;padding-top:8px
@@ -103,10 +120,12 @@ h1{font-size:1.5rem;font-weight:700;color:#f1f5f9}
     <div class="status-row">
       <div class="status-dot dot-checking" id="canslim-dot"></div>
       <span class="status-label" id="canslim-label">检测中...</span>
+      <button class="rotate-btn" id="canslim-rotate" title="隧道太慢时手动更换">更换</button>
     </div>
     <div class="status-row">
       <div class="status-dot dot-checking" id="etf-dot"></div>
       <span class="status-label" id="etf-label">检测中...</span>
+      <button class="rotate-btn" id="etf-rotate" title="隧道太慢时手动更换">更换</button>
     </div>
     <div class="status-section-hdr">守护者</div>
     <div class="status-row">
@@ -124,6 +143,9 @@ h1{font-size:1.5rem;font-weight:700;color:#f1f5f9}
 // ===== 配置 =====
 var CANSLIM_JID = '019fbf57-7448-721b-8f42-972d8958e3ba'; // 当前活跃 blob
 var ETF_JID = '019fbdc8-d195-725d-b139-fa721e65bb0b';
+// 手动换隧道指令通道（固定 ID jsonblob）：前端 PUT 指令 → 守护者轮询执行 → 清空
+var CANSLIM_CMD_JID = '019fc0ad-2e06-7720-91d0-0439a9e5db3e';
+var ETF_CMD_JID = '019fc0ad-3661-7941-bfe7-3b134a0ccc3e';
 var FETCH_TIMEOUT = 3000;   // blob/config 3s 超时
 var PROBE_TIMEOUT = 8000;   // 隧道探测 8s 超时（与守护者健康检查对齐，减少 r10/r8/r17 慢节点误报）
 var HEARTBEAT_TOLERANCE = 180; // 守护者在线判定阈值：ts 超过 180s 才算离线（心跳 120s+15s 抖动 + 重试余量）
@@ -278,11 +300,60 @@ function refresh(name, jid, cfgPath, ids){
   });
 }
 
+// ===== 手动更换隧道 =====
+// 前端无法直接命令守护进程（静态页），通过"指令 jsonblob"中间信箱：
+// PUT {"cmd":"rotate"} → 守护者每 30s 轮询指令 → 执行隧道轮换 → 清空指令
+function sendRotateCmd(name, cmdJid, btnId){
+  var btn = el(btnId);
+  if(!btn || btn.disabled) return;
+  if(!confirm('确定更换「' + name + '」的隧道？\n\n将重启隧道服务（约 10-30 秒），期间应用可能短暂无法访问。')){
+    return;
+  }
+  btn.disabled = true;
+  btn.classList.add('sending');
+  btn.textContent = '发送中...';
+  var ctrl = new AbortController();
+  setTimeout(function(){ ctrl.abort(); }, 8000);
+  fetch('https://jsonblob.com/api/jsonBlob/' + cmdJid, {
+    method: 'PUT',
+    headers: {'Content-Type': 'application/json'},
+    body: JSON.stringify({cmd:'rotate', ts: Math.floor(Date.now()/1000)}),
+    signal: ctrl.signal
+  }).then(function(r){
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    btn.classList.remove('sending');
+    btn.textContent = '已发送 ✓';
+    setTimeout(function(){
+      if(!btn.dataset.disabled){
+        btn.disabled = false;
+        btn.textContent = '更换';
+      }
+    }, 5000);
+  }).catch(function(){
+    btn.classList.remove('sending');
+    btn.textContent = '发送失败';
+    setTimeout(function(){
+      if(!btn.dataset.disabled){
+        btn.disabled = false;
+        btn.textContent = '更换';
+      }
+    }, 3000);
+  });
+}
+
 el('status-section').style.display = 'block';
 
 // ===== 秒出：先渲染上次缓存（isPreview=true：不探测不计数，等 refresh 接管）=====
 renderApp('CANSLIM', loadState('canslim'), ['canslim-dot','canslim-label','canslim-super-dot','canslim-super-label'], true);
 renderApp('宽基ETF', loadState('etf'), ['etf-dot','etf-label','etf-super-dot','etf-super-label'], true);
+
+// ===== 手动更换隧道按钮 =====
+el('canslim-rotate').addEventListener('click', function(){
+  sendRotateCmd('CANSLIM', CANSLIM_CMD_JID, 'canslim-rotate');
+});
+el('etf-rotate').addEventListener('click', function(){
+  sendRotateCmd('宽基ETF', ETF_CMD_JID, 'etf-rotate');
+});
 
 // ===== 立即检测 + 30s 轮询 =====
 refresh('CANSLIM', CANSLIM_JID, 'canslim/config.json', ['canslim-dot','canslim-label','canslim-super-dot','canslim-super-label']);
