@@ -121,8 +121,17 @@ h1{font-size:1.5rem;font-weight:700;color:#f1f5f9}
 </div>
 <script>
 (function(){
-var CANSLIM_JID = '019fa887-89f3-7d57-8ff0-5fbd872a7a2e';
-var ETF_JID = '019fa886-07dc-73da-9d65-8a1e661870d8';
+// ===== 配置 =====
+var CANSLIM_JID = '019fbf57-7448-721b-8f42-972d8958e3ba'; // 当前活跃 blob
+var ETF_JID = '019fbdc8-d195-725d-b139-fa721e65bb0b';
+var FETCH_TIMEOUT = 3000;   // blob/config 3s 超时
+var PROBE_TIMEOUT = 8000;   // 隧道探测 8s 超时（与守护者健康检查对齐，减少 r10/r8/r17 慢节点误报）
+var HEARTBEAT_TOLERANCE = 180; // 守护者在线判定阈值：ts 超过 180s 才算离线（心跳 120s+15s 抖动 + 重试余量）
+var POLL_MS = 30000;        // 30s 轮询
+var FAIL_THRESHOLD = 2;     // 防抖：连续失败 N 次才报"离线/检测中"，避免单次网络波动误报
+// 防抖计数器（按应用名）：心跳读取失败 / 隧道探测失败各计各的，成功即清零
+var hbFail = {};
+var tuFail = {};
 
 function el(id){return document.getElementById(id)}
 
@@ -136,71 +145,152 @@ function shortHost(url){
   return h.length > 10 ? h.slice(0,10)+'...' : h;
 }
 
-function checkTunnel(url, dotId, labelId, name){
-  setDot(dotId, 'dot-checking');
-  var host = shortHost(url);
-  el(labelId).textContent = host;
-
+// 带超时的 fetch
+// cache:'no-store' 关键：GitHub Pages CDN 对 config.json 有 max-age=600 缓存，
+// 不加 no-store 会命中 10 分钟旧心跳 → 守护者误判离线
+function fetchTimeout(url, ms){
   var ctrl = new AbortController();
-  setTimeout(function(){ ctrl.abort() }, 6000);
-  fetch(url, {mode: 'no-cors', signal: ctrl.signal})
-    .then(function(){
-      setDot(dotId, 'dot-online');
-      el(labelId).innerHTML = '<span class="name-tag">'+name+'</span> <a href="'+url+'" target="_blank">'+host+'</a>';
-    })
-    .catch(function(){
-      setDot(dotId, 'dot-offline');
-      el(labelId).textContent = name+' 离线';
-    });
+  var t = setTimeout(function(){ ctrl.abort() }, ms);
+  return fetch(url, {signal: ctrl.signal, cache: 'no-store'}).then(function(r){
+    clearTimeout(t);
+    if(!r.ok) throw new Error('HTTP '+r.status);
+    return r.json();
+  }, function(e){ clearTimeout(t); throw e; });
+}
+
+// localStorage 缓存（秒出用；超过 10 分钟视为过期，避免旧状态闪烁）
+var CACHE_TTL = 10*60*1000;
+function saveState(name, d){
+  try{ localStorage.setItem('toolbox_'+name, JSON.stringify({url:d.url, ts:d.ts||0, src:d.src||'', at:Date.now()})); }catch(e){}
+}
+function loadState(name){
+  try{
+    var c = JSON.parse(localStorage.getItem('toolbox_'+name));
+    if(c && (Date.now() - (c.at||0)) < CACHE_TTL) return c;
+    return null;
+  }catch(e){ return null; }
+}
+
+// 心跳与隧道解耦设计：
+// - 心跳（守护者在线与否）只认 jsonblob —— 它实时（no-cache + ETag 验证），是权威源
+// - 隧道状态独立判断 —— 拿 jsonblob 里的 url 直接探测可达性
+// - 不再读 config.json：GitHub Pages CDN 对它 max-age=600 缓存，ts/url 都不可信，兜底价值低
+var JSONBLOB_TIMEOUT = 6000; // jsonblob 国外服务，给足 6s
+function fetchAppState(jid, cfgPath){
+  return new Promise(function(resolve){
+    var got = false;
+    function done(d){ if(got) return; got = true; resolve(d); }
+    // 唯一数据源：jsonblob（实时心跳 + 隧道 url）
+    fetchTimeout('https://jsonblob.com/api/jsonBlob/'+jid, JSONBLOB_TIMEOUT)
+      .then(function(d){ if(d && d.url) done({url:d.url, ts:d.ts||0, src:'jsonblob'}); })
+      .catch(function(){});
+    setTimeout(function(){ done(null); }, JSONBLOB_TIMEOUT + 500); // 防呆兜底
+  });
 }
 
 function ageText(ts){
   if(!ts) return '';
   var sec = Math.floor(Date.now()/1000 - ts);
-  if(sec < 60) return sec+'s前';
-  if(sec < 3600) return Math.floor(sec/60)+'m前';
-  return Math.floor(sec/3600)+'h前';
+  return sec+'s前';
 }
 
-function checkSupervisor(d, superDotId, superLabelId, name){
-  var alive = d && d.ts && ((Date.now()/1000) - d.ts) < 120;
-  var ts = d && d.ts ? d.ts : 0;
+// 渲染单个应用的状态（隧道 + 守护者），心跳与隧道解耦：
+// - 心跳：只认 jsonblob 的 ts（src==='jsonblob' 才判在线/离线）
+// - 隧道：拿 url 直接探测可达性（独立于心跳）
+function renderApp(name, d, ids, isPreview){
+  var tunnelDot = ids[0], tunnelLabel = ids[1], superDot = ids[2], superLabel = ids[3];
+  var key = name;
+  var now = Date.now()/1000;
+  var isHeartbeat = d && d.src === 'jsonblob' && d.ts;   // 只有 jsonblob 的 ts 可信
+  var alive = isHeartbeat && ((now - d.ts) < HEARTBEAT_TOLERANCE); // 守护者在线只看 jsonblob ts 新鲜度
+
+  // ===== 心跳防抖 =====
+  // jsonblob 读取失败或 ts 过期 → 失败计数 +1；只有连续 FAIL_THRESHOLD 次失败才报"检测中/离线"
+  // 任意一次成功（读到新鲜心跳）→ 清零
+  // isPreview（秒出缓存渲染）不参与计数，避免"缓存渲染+立即refresh"同秒计两次
+  var hbOk = isHeartbeat && alive;
+  if(!isPreview){
+    if(hbOk){
+      hbFail[key] = 0;
+    } else {
+      hbFail[key] = (hbFail[key]||0) + 1;
+    }
+  }
+  var hbStable = hbFail[key] >= FAIL_THRESHOLD; // 连续失败足够次，判定为稳定离线
+
+  var ts = isHeartbeat ? d.ts : 0;
   var tsStr = ts ? new Date(ts*1000).toTimeString().slice(0,5) : '';
   var age = alive ? ageText(ts) : '';
-  setDot(superDotId, alive ? 'dot-online' : 'dot-offline');
-  el(superLabelId).innerHTML = alive
-    ? '<span class=\"name-tag\" style=\"display:inline-block;min-width:64px\">' + name + '</span><span style=\"font-size:0.7rem;color:#64748b\">' + tsStr + ' · ' + age + '</span>'
-    : ('<span class=\"name-tag\" style=\"display:inline-block;min-width:64px\">' + name + '</span><span style=\"font-size:0.7rem;color:#ef4444\">离线</span>');
-  return alive;
+
+  // 守护者行：有新鲜 jsonblob 心跳 → 在线；连续 FAIL_THRESHOLD 次失败 → 离线；其余 → 检测中
+  if(hbOk){
+    setDot(superDot, 'dot-online');
+    el(superLabel).innerHTML = '<span class="name-tag" style="display:inline-block;min-width:64px">' + name + '</span><span style="font-size:0.7rem;color:#64748b">' + tsStr + ' · ' + age + '</span>';
+  } else if(hbStable){
+    setDot(superDot, 'dot-offline');
+    el(superLabel).innerHTML = '<span class="name-tag" style="display:inline-block;min-width:64px">' + name + '</span><span style="font-size:0.7rem;color:#ef4444">离线</span>';
+  } else {
+    // 首次失败（或缓存兜底无新鲜心跳）：检测中，等下一次轮询确认
+    setDot(superDot, 'dot-checking');
+    el(superLabel).innerHTML = '<span class="name-tag" style="display:inline-block;min-width:64px">' + name + '</span><span style="font-size:0.7rem;color:#f59e0b">检测中</span>';
+  }
+
+  // 隧道行（独立探测，与心跳无关）
+  if(d && d.url){
+    setDot(tunnelDot, 'dot-checking');
+    el(tunnelLabel).textContent = shortHost(d.url);
+    if(isPreview){
+      // 秒出：不探测不计数，显示检测中占位，等 refresh 结果接管
+      return;
+    }
+    var ctrl = new AbortController();
+    setTimeout(function(){ ctrl.abort() }, PROBE_TIMEOUT);
+    fetch(d.url, {mode:'no-cors', signal:ctrl.signal})
+      .then(function(){
+        tuFail[key] = 0;   // 探测成功 → 清零防抖计数
+        setDot(tunnelDot, 'dot-online');
+        el(tunnelLabel).innerHTML = '<span class="name-tag">'+name+'</span> <a href="'+d.url+'" target="_blank">'+shortHost(d.url)+'</a>';
+      })
+      .catch(function(){
+        tuFail[key] = (tuFail[key]||0) + 1;   // 探测失败 → 计数
+        if(tuFail[key] >= FAIL_THRESHOLD){    // 连续失败足够次才报离线
+          setDot(tunnelDot, 'dot-offline');
+          el(tunnelLabel).textContent = name+' 离线';
+        } else {
+          setDot(tunnelDot, 'dot-checking');  // 首次失败不报，保持检测中等待下轮
+          el(tunnelLabel).textContent = shortHost(d.url);
+        }
+      });
+  } else if(isPreview){
+    // 秒出且无缓存 url：显示检测中占位，不报离线
+    setDot(tunnelDot, 'dot-checking');
+    el(tunnelLabel).textContent = name+' 检测中';
+  } else {
+    setDot(tunnelDot, 'dot-offline');
+    el(tunnelLabel).textContent = name+' 离线';
+  }
+}
+
+function refresh(name, jid, cfgPath, ids){
+  fetchAppState(jid, cfgPath).then(function(d){
+    if(d) saveState(name.toLowerCase(), d);
+    renderApp(name, d || loadState(name.toLowerCase()), ids);
+  });
 }
 
 el('status-section').style.display = 'block';
 
-// CANSLIM
-fetch('https://jsonblob.com/api/jsonBlob/'+CANSLIM_JID).then(function(r){return r.json()}).then(function(d){
-  if(d && d.url){
-    checkSupervisor(d, 'canslim-super-dot', 'canslim-super-label', 'CANSLIM');
-    checkTunnel(d.url, 'canslim-dot', 'canslim-label', 'CANSLIM');
-  }
-}).catch(function(){
-  setDot('canslim-dot', 'dot-offline');
-  el('canslim-label').textContent = 'CANSLIM 离线';
-  setDot('canslim-super-dot', 'dot-offline');
-  el('canslim-super-label').textContent = 'CANSLIM 离线';
-});
+// ===== 秒出：先渲染上次缓存（isPreview=true：不探测不计数，等 refresh 接管）=====
+renderApp('CANSLIM', loadState('canslim'), ['canslim-dot','canslim-label','canslim-super-dot','canslim-super-label'], true);
+renderApp('宽基ETF', loadState('etf'), ['etf-dot','etf-label','etf-super-dot','etf-super-label'], true);
 
-// ETF
-fetch('https://jsonblob.com/api/jsonBlob/'+ETF_JID).then(function(r){return r.json()}).then(function(d){
-  if(d && d.url){
-    checkSupervisor(d, 'etf-super-dot', 'etf-super-label', '宽基ETF');
-    checkTunnel(d.url, 'etf-dot', 'etf-label', '宽基ETF');
-  }
-}).catch(function(){
-  setDot('etf-dot', 'dot-offline');
-  el('etf-label').textContent = '宽基ETF 离线';
-  setDot('etf-super-dot', 'dot-offline');
-  el('etf-super-label').textContent = 'ETF 离线';
-});
+// ===== 立即检测 + 30s 轮询 =====
+refresh('CANSLIM', CANSLIM_JID, 'canslim/config.json', ['canslim-dot','canslim-label','canslim-super-dot','canslim-super-label']);
+refresh('宽基ETF', ETF_JID, 'etf/config.json', ['etf-dot','etf-label','etf-super-dot','etf-super-label']);
+setInterval(function(){
+  refresh('CANSLIM', CANSLIM_JID, 'canslim/config.json', ['canslim-dot','canslim-label','canslim-super-dot','canslim-super-label']);
+  refresh('宽基ETF', ETF_JID, 'etf/config.json', ['etf-dot','etf-label','etf-super-dot','etf-super-label']);
+}, POLL_MS);
 })();
 </script>
 </body>
