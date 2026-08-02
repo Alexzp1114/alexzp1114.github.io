@@ -18,16 +18,35 @@ p{font-size:.85rem;color:#94a3b8;margin:6px 0 0}
 var done=false;
 function go(u){if(done||!u)return;done=true;location.replace(u);}
 
-// jsonblob 动态读取隧道 URL
-fetch('https://jsonblob.com/api/jsonBlob/019fa887-89f3-7d57-8ff0-5fbd872a7a2e')
-.then(function(r){return r.json()}).then(function(d){go(d.url)}).catch(function(){});
-// 2 秒兜底 → config.json
-setTimeout(function(){
-fetch('config.json').then(function(r){return r.json()}).then(function(d){go(d.url)})
-.catch(function(){
-document.querySelector('.container').innerHTML='<h1>CANSLIM</h1><p>服务暂不可用</p>';
+var CANSLIM_JID = '019fbf57-7448-721b-8f42-972d8958e3ba';
+
+// 跳转 URL 获取：jsonblob 唯一优先源（实时，无 CDN 缓存），config.json 仅延迟兜底
+// 不再"谁快用谁"：config.json 被 GitHub Pages CDN 缓存 10 分钟，旧 URL 可能已 404
+function fetchUrl(jid){
+  return new Promise(function(resolve){
+    var got = false;
+    function done(u){ if(got) return; got = true; resolve(u); }
+    var ctrl = new AbortController();
+    setTimeout(function(){ ctrl.abort(); }, 6000);
+    fetch('https://jsonblob.com/api/jsonBlob/'+jid, {signal:ctrl.signal, cache:'no-store'})
+      .then(function(r){ return r.json(); })
+      .then(function(d){ if(d && d.url) done(d.url); })
+      .catch(function(){});
+    // config.json 延迟兜底：jsonblob 超时后才读（CDN 缓存可能旧，仅作最后手段）
+    setTimeout(function(){
+      fetch('config.json', {cache:'no-store'})
+        .then(function(r){ return r.json(); })
+        .then(function(d){ if(d && d.url) done(d.url); })
+        .catch(function(){});
+    }, 6000);
+    setTimeout(function(){ done(null); }, 6500); // 防呆兜底
+  });
+}
+
+fetchUrl(CANSLIM_JID).then(function(u){
+  if(u){ go(u); return; }
+  document.querySelector('.container').innerHTML='<h1>CANSLIM</h1><p>服务暂不可用</p>';
 });
-},2000);
 })();
 </script>
 </head>
