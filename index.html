@@ -141,10 +141,12 @@ function shortHost(url){
 }
 
 // 带超时的 fetch
+// cache:'no-store' 关键：GitHub Pages CDN 对 config.json 有 max-age=600 缓存，
+// 不加 no-store 会命中 10 分钟旧心跳 → 守护者误判离线
 function fetchTimeout(url, ms){
   var ctrl = new AbortController();
   var t = setTimeout(function(){ ctrl.abort() }, ms);
-  return fetch(url, {signal: ctrl.signal}).then(function(r){
+  return fetch(url, {signal: ctrl.signal, cache: 'no-store'}).then(function(r){
     clearTimeout(t);
     if(!r.ok) throw new Error('HTTP '+r.status);
     return r.json();
