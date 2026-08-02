@@ -166,18 +166,25 @@ function loadState(name){
   }catch(e){ return null; }
 }
 
-// 双通道：jsonblob（快） + config.json（兜底），谁先返回有效数据用谁
+// 双通道：jsonblob（实时主源，无 CDN 缓存） + config.json（兜底，仅 jsonblob 失败时用）
+// 顺序很关键：GitHub Pages CDN 对 config.json 有 max-age=600 缓存（10 分钟旧心跳），
+// 若"谁先返回用谁"，config.json(0.5s) 会抢在 jsonblob(1s) 前返回旧 ts → 误判离线。
+// 因此以 jsonblob 为准，config.json 降级为兜底。
+// 返回值带 src 标记：'jsonblob' 主源（ts 可信，可判离线）/ 'config' 兜底（ts 受 CDN 缓存影响，不可靠）
+var JSONBLOB_TIMEOUT = 6000; // jsonblob 国外服务，给足 6s
 function fetchAppState(jid, cfgPath){
   return new Promise(function(resolve){
     var got = false;
     function done(d){ if(got) return; got = true; resolve(d); }
-    fetchTimeout('https://jsonblob.com/api/jsonBlob/'+jid, FETCH_TIMEOUT)
-      .then(function(d){ if(d && d.url) done({url:d.url, ts:d.ts||0}); })
+    // 主通道：jsonblob（实时，无 CDN 缓存）
+    fetchTimeout('https://jsonblob.com/api/jsonBlob/'+jid, JSONBLOB_TIMEOUT)
+      .then(function(d){ if(d && d.url) done({url:d.url, ts:d.ts||0, src:'jsonblob'}); })
       .catch(function(){});
+    // 兜底通道：config.json（CDN 有缓存，no-store 强制回源；仅当 jsonblob 彻底失败时用）
     fetchTimeout(cfgPath, FETCH_TIMEOUT)
-      .then(function(d){ if(d && d.url) done({url:d.url, ts:d.ts||0}); })
+      .then(function(d){ if(d && d.url) done({url:d.url, ts:d.ts||0, src:'config'}); })
       .catch(function(){});
-    setTimeout(function(){ done(null); }, FETCH_TIMEOUT + 500); // 防呆兜底
+    setTimeout(function(){ done(null); }, JSONBLOB_TIMEOUT + 500); // 防呆兜底
   });
 }
 
@@ -188,22 +195,26 @@ function ageText(ts){
 }
 
 // 渲染单个应用的状态（隧道 + 守护者）
+// src: 'jsonblob' 主源（ts 可信，可判离线）/ 'config' 兜底（ts 受 CDN 缓存影响，旧 ts 不判离线只显示心跳中）
 function renderApp(name, d, ids){
   var tunnelDot = ids[0], tunnelLabel = ids[1], superDot = ids[2], superLabel = ids[3];
   var now = Date.now()/1000;
+  var isPrimary = d && d.src === 'jsonblob';
   var alive = d && d.ts && ((now - d.ts) < 150);   // 守护者在线只看 ts 新鲜度
   var hasTs  = d && d.ts ? true : false;           // 有无心跳时间戳
   var ts = d && d.ts ? d.ts : 0;
   var tsStr = ts ? new Date(ts*1000).toTimeString().slice(0,5) : '';
   var age = alive ? ageText(ts) : '';
 
-  // 守护者行：有 ts → 按新鲜度判在线/离线；无 ts（config 兜底）→ 显示"心跳中"等待 jsonblob
-  setDot(superDot, hasTs ? (alive ? 'dot-online' : 'dot-offline') : 'dot-checking');
-  el(superLabel).innerHTML = hasTs
-    ? (alive
-        ? '<span class="name-tag" style="display:inline-block;min-width:64px">' + name + '</span><span style="font-size:0.7rem;color:#64748b">' + tsStr + ' · ' + age + '</span>'
-        : '<span class="name-tag" style="display:inline-block;min-width:64px">' + name + '</span><span style="font-size:0.7rem;color:#ef4444">离线</span>')
-    : ('<span class="name-tag" style="display:inline-block;min-width:64px">' + name + '</span><span style="font-size:0.7rem;color:#f59e0b">心跳中</span>');
+  // 守护者行：jsonblob 主源 → 按 ts 判在线/离线；config 兜底 → 旧 ts 不判离线，显示"心跳中"（CDN 缓存不可信）
+  var offline = isPrimary && hasTs && !alive;
+  var checking = (!isPrimary || !hasTs);
+  setDot(superDot, offline ? 'dot-offline' : (checking ? 'dot-checking' : 'dot-online'));
+  el(superLabel).innerHTML = offline
+    ? '<span class="name-tag" style="display:inline-block;min-width:64px">' + name + '</span><span style="font-size:0.7rem;color:#ef4444">离线</span>'
+    : (checking
+        ? '<span class="name-tag" style="display:inline-block;min-width:64px">' + name + '</span><span style="font-size:0.7rem;color:#f59e0b">心跳中</span>'
+        : '<span class="name-tag" style="display:inline-block;min-width:64px">' + name + '</span><span style="font-size:0.7rem;color:#64748b">' + tsStr + ' · ' + age + '</span>');
 
   // 隧道行
   if(d && d.url){
