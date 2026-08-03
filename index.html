@@ -77,23 +77,6 @@ h1{font-size:1.5rem;font-weight:700;color:#f1f5f9}
 .status-label a:hover{text-decoration:underline}
 .name-tag{display:inline-block;min-width:64px}
 
-/* 隧道更换按钮 */
-.rotate-btn{
-  flex-shrink:0;
-  background:rgba(56,189,248,.12);
-  border:1px solid rgba(56,189,248,.35);
-  color:#7dd3fc;
-  font-size:.65rem;line-height:1;
-  padding:4px 8px;border-radius:5px;
-  cursor:pointer;
-  transition:background .15s,transform .15s,opacity .15s;
-  opacity:.85;user-select:none
-}
-.rotate-btn:hover{background:rgba(56,189,248,.25);transform:translateY(-1px);opacity:1}
-.rotate-btn:active{transform:translateY(0)}
-.rotate-btn:disabled{opacity:.4;cursor:not-allowed;transform:none}
-.rotate-btn.sending{background:rgba(245,158,11,.15);border-color:rgba(245,158,11,.4);color:#fbbf24}
-
 .footer{
   text-align:center;font-size:.65rem;color:#475569;
   margin-top:8px;padding-top:8px
@@ -120,12 +103,10 @@ h1{font-size:1.5rem;font-weight:700;color:#f1f5f9}
     <div class="status-row">
       <div class="status-dot dot-checking" id="canslim-dot"></div>
       <span class="status-label" id="canslim-label">检测中...</span>
-      <button class="rotate-btn" id="canslim-rotate" title="隧道太慢时手动更换">更换</button>
     </div>
     <div class="status-row">
       <div class="status-dot dot-checking" id="etf-dot"></div>
       <span class="status-label" id="etf-label">检测中...</span>
-      <button class="rotate-btn" id="etf-rotate" title="隧道太慢时手动更换">更换</button>
     </div>
     <div class="status-section-hdr">守护者</div>
     <div class="status-row">
@@ -141,11 +122,11 @@ h1{font-size:1.5rem;font-weight:700;color:#f1f5f9}
 <script>
 (function(){
 // ===== 配置 =====
-var CANSLIM_JID = '019fc47e-6e3a-7e46-9dd0-0e6ba21dd170'; // 当前活跃 blob
+var CANSLIM_JID = '019fbf57-7448-721b-8f42-972d8958e3ba'; // 当前活跃 blob
 var ETF_JID = '019fc2ef-a27b-7021-9165-ea048b068b2b';
-// 手动换隧道指令通道（固定 ID jsonblob）：前端 PUT 指令 → 守护者轮询执行 → 清空
-var CANSLIM_CMD_JID = '019fc0ad-2e06-7720-91d0-0439a9e5db3e';
-var ETF_CMD_JID = '019fc0ad-3661-7941-bfe7-3b134a0ccc3e';
+// Cloudflare Tunnel 固定域名（一隧道双服务，域名永不变，无需手动换隧道）
+var CF_CANSLIM = 'https://canslim.alexzp1114.top';
+var CF_ETF = 'https://etf.alexzp1114.top';
 var FETCH_TIMEOUT = 3000;   // blob/config 3s 超时
 var PROBE_TIMEOUT = 8000;   // 隧道探测 8s 超时（与守护者健康检查对齐，减少 r10/r8/r17 慢节点误报）
 var HEARTBEAT_TOLERANCE = 180; // 守护者在线判定阈值：ts 超过 180s 才算离线（心跳 120s+15s 抖动 + 重试余量）
@@ -160,11 +141,6 @@ function el(id){return document.getElementById(id)}
 function setDot(id, cls){
   var d = el(id); if(!d) return;
   d.className = 'status-dot ' + cls;
-}
-
-function shortHost(url){
-  var h = url.replace('https://','').replace('http://','').split('.')[0];
-  return h.length > 10 ? h.slice(0,10)+'...' : h;
 }
 
 // 带超时的 fetch
@@ -195,16 +171,16 @@ function loadState(name){
 
 // 心跳与隧道解耦设计：
 // - 心跳（守护者在线与否）只认 jsonblob —— 它实时（no-cache + ETag 验证），是权威源
-// - 隧道状态独立判断 —— 拿 jsonblob 里的 url 直接探测可达性
+// - 隧道状态独立判断 —— CF 域名固定，直接探测连通性（与心跳无关）
 // - 不再读 config.json：GitHub Pages CDN 对它 max-age=600 缓存，ts/url 都不可信，兜底价值低
 var JSONBLOB_TIMEOUT = 6000; // jsonblob 国外服务，给足 6s
-function fetchAppState(jid, cfgPath){
+function fetchAppState(jid){
   return new Promise(function(resolve){
     var got = false;
     function done(d){ if(got) return; got = true; resolve(d); }
-    // 唯一数据源：jsonblob（实时心跳 + 隧道 url）
+    // 唯一数据源：jsonblob（实时心跳）
     fetchTimeout('https://jsonblob.com/api/jsonBlob/'+jid, JSONBLOB_TIMEOUT)
-      .then(function(d){ if(d && d.url) done({url:d.url, ts:d.ts||0, src:'jsonblob'}); })
+      .then(function(d){ if(d && d.ts) done({ts:d.ts||0, src:'jsonblob'}); })
       .catch(function(){});
     setTimeout(function(){ done(null); }, JSONBLOB_TIMEOUT + 500); // 防呆兜底
   });
@@ -218,8 +194,8 @@ function ageText(ts){
 
 // 渲染单个应用的状态（隧道 + 守护者），心跳与隧道解耦：
 // - 心跳：只认 jsonblob 的 ts（src==='jsonblob' 才判在线/离线）
-// - 隧道：拿 url 直接探测可达性（独立于心跳）
-function renderApp(name, d, ids, isPreview){
+// - 隧道：CF 域名固定，直接探测可达性（独立于心跳）
+function renderApp(name, d, ids, cfUrl, isPreview){
   var tunnelDot = ids[0], tunnelLabel = ids[1], superDot = ids[2], superLabel = ids[3];
   var key = name;
   var now = Date.now()/1000;
@@ -257,110 +233,53 @@ function renderApp(name, d, ids, isPreview){
     el(superLabel).innerHTML = '<span class="name-tag" style="display:inline-block;min-width:64px">' + name + '</span><span style="font-size:0.7rem;color:#f59e0b">检测中</span>';
   }
 
-  // 隧道行（独立探测，与心跳无关）
-  if(d && d.url){
-    setDot(tunnelDot, 'dot-checking');
-    el(tunnelLabel).textContent = shortHost(d.url);
-    if(isPreview){
-      // 秒出：不探测不计数，显示检测中占位，等 refresh 结果接管
-      return;
-    }
-    var ctrl = new AbortController();
-    setTimeout(function(){ ctrl.abort() }, PROBE_TIMEOUT);
-    fetch(d.url, {mode:'no-cors', signal:ctrl.signal})
-      .then(function(){
-        tuFail[key] = 0;   // 探测成功 → 清零防抖计数
-        setDot(tunnelDot, 'dot-online');
-        el(tunnelLabel).innerHTML = '<span class="name-tag">'+name+'</span> <a href="'+d.url+'" target="_blank">'+shortHost(d.url)+'</a>';
-      })
-      .catch(function(){
-        tuFail[key] = (tuFail[key]||0) + 1;   // 探测失败 → 计数
-        if(tuFail[key] >= FAIL_THRESHOLD){    // 连续失败足够次才报离线
-          setDot(tunnelDot, 'dot-offline');
-          el(tunnelLabel).textContent = name+' 离线';
-        } else {
-          setDot(tunnelDot, 'dot-checking');  // 首次失败不报，保持检测中等待下轮
-          el(tunnelLabel).textContent = shortHost(d.url);
-        }
-      });
-  } else if(isPreview){
-    // 秒出且无缓存 url：显示检测中占位，不报离线
-    setDot(tunnelDot, 'dot-checking');
-    el(tunnelLabel).textContent = name+' 检测中';
-  } else {
-    setDot(tunnelDot, 'dot-offline');
-    el(tunnelLabel).textContent = name+' 离线';
-  }
-}
-
-function refresh(name, jid, cfgPath, ids){
-  fetchAppState(jid, cfgPath).then(function(d){
-    if(d) saveState(name.toLowerCase(), d);
-    renderApp(name, d || loadState(name.toLowerCase()), ids);
-  });
-}
-
-// ===== 手动更换隧道 =====
-// 前端无法直接命令守护进程（静态页），通过"指令 jsonblob"中间信箱：
-// PUT {"cmd":"rotate"} → 守护者每 30s 轮询指令 → 执行隧道轮换 → 清空指令
-function sendRotateCmd(name, cmdJid, btnId){
-  var btn = el(btnId);
-  if(!btn || btn.disabled) return;
-  if(!confirm('确定更换「' + name + '」的隧道？\n\n将重启隧道服务（约 10-30 秒），期间应用可能短暂无法访问。')){
+  // 隧道行（独立探测，与心跳无关）：CF 域名固定，直接探测域名可达性
+  var cfHost = cfUrl.replace('https://','').replace(/\/$/,'');
+  setDot(tunnelDot, 'dot-checking');
+  el(tunnelLabel).textContent = name+' 检测中';
+  if(isPreview){
+    // 秒出：不探测不计数，显示检测中占位，等 refresh 结果接管
     return;
   }
-  btn.disabled = true;
-  btn.classList.add('sending');
-  btn.textContent = '发送中...';
   var ctrl = new AbortController();
-  setTimeout(function(){ ctrl.abort(); }, 8000);
-  fetch('https://jsonblob.com/api/jsonBlob/' + cmdJid, {
-    method: 'PUT',
-    headers: {'Content-Type': 'application/json'},
-    body: JSON.stringify({cmd:'rotate', ts: Math.floor(Date.now()/1000)}),
-    signal: ctrl.signal
-  }).then(function(r){
-    if(!r.ok) throw new Error('HTTP '+r.status);
-    btn.classList.remove('sending');
-    btn.textContent = '已发送 ✓';
-    setTimeout(function(){
-      if(!btn.dataset.disabled){
-        btn.disabled = false;
-        btn.textContent = '更换';
+  setTimeout(function(){ ctrl.abort() }, PROBE_TIMEOUT);
+  fetch(cfUrl, {mode:'no-cors', signal:ctrl.signal})
+    .then(function(){
+      tuFail[key] = 0;   // 探测成功 → 清零防抖计数
+      setDot(tunnelDot, 'dot-online');
+      el(tunnelLabel).innerHTML = '<span class="name-tag">'+name+'</span> <a href="'+cfUrl+'" target="_blank">'+cfHost+'</a>';
+    })
+    .catch(function(){
+      tuFail[key] = (tuFail[key]||0) + 1;   // 探测失败 → 计数
+      if(tuFail[key] >= FAIL_THRESHOLD){    // 连续失败足够次才报离线
+        setDot(tunnelDot, 'dot-offline');
+        el(tunnelLabel).textContent = name+' 离线';
+      } else {
+        setDot(tunnelDot, 'dot-checking');  // 首次失败不报，保持检测中等待下轮
+        el(tunnelLabel).textContent = cfHost;
       }
-    }, 5000);
-  }).catch(function(){
-    btn.classList.remove('sending');
-    btn.textContent = '发送失败';
-    setTimeout(function(){
-      if(!btn.dataset.disabled){
-        btn.disabled = false;
-        btn.textContent = '更换';
-      }
-    }, 3000);
+    });
+}
+
+function refresh(name, jid, ids, cfUrl){
+  fetchAppState(jid).then(function(d){
+    if(d) saveState(name.toLowerCase(), d);
+    renderApp(name, d || loadState(name.toLowerCase()), ids, cfUrl);
   });
 }
 
 el('status-section').style.display = 'block';
 
 // ===== 秒出：先渲染上次缓存（isPreview=true：不探测不计数，等 refresh 接管）=====
-renderApp('CANSLIM', loadState('canslim'), ['canslim-dot','canslim-label','canslim-super-dot','canslim-super-label'], true);
-renderApp('宽基ETF', loadState('etf'), ['etf-dot','etf-label','etf-super-dot','etf-super-label'], true);
-
-// ===== 手动更换隧道按钮 =====
-el('canslim-rotate').addEventListener('click', function(){
-  sendRotateCmd('CANSLIM', CANSLIM_CMD_JID, 'canslim-rotate');
-});
-el('etf-rotate').addEventListener('click', function(){
-  sendRotateCmd('宽基ETF', ETF_CMD_JID, 'etf-rotate');
-});
+renderApp('CANSLIM', loadState('canslim'), ['canslim-dot','canslim-label','canslim-super-dot','canslim-super-label'], CF_CANSLIM, true);
+renderApp('宽基ETF', loadState('etf'), ['etf-dot','etf-label','etf-super-dot','etf-super-label'], CF_ETF, true);
 
 // ===== 立即检测 + 30s 轮询 =====
-refresh('CANSLIM', CANSLIM_JID, 'canslim/config.json', ['canslim-dot','canslim-label','canslim-super-dot','canslim-super-label']);
-refresh('宽基ETF', ETF_JID, 'etf/config.json', ['etf-dot','etf-label','etf-super-dot','etf-super-label']);
+refresh('CANSLIM', CANSLIM_JID, ['canslim-dot','canslim-label','canslim-super-dot','canslim-super-label'], CF_CANSLIM);
+refresh('宽基ETF', ETF_JID, ['etf-dot','etf-label','etf-super-dot','etf-super-label'], CF_ETF);
 setInterval(function(){
-  refresh('CANSLIM', CANSLIM_JID, 'canslim/config.json', ['canslim-dot','canslim-label','canslim-super-dot','canslim-super-label']);
-  refresh('宽基ETF', ETF_JID, 'etf/config.json', ['etf-dot','etf-label','etf-super-dot','etf-super-label']);
+  refresh('CANSLIM', CANSLIM_JID, ['canslim-dot','canslim-label','canslim-super-dot','canslim-super-label'], CF_CANSLIM);
+  refresh('宽基ETF', ETF_JID, ['etf-dot','etf-label','etf-super-dot','etf-super-label'], CF_ETF);
 }, POLL_MS);
 })();
 </script>
