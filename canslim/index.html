@@ -18,35 +18,38 @@ p{font-size:.85rem;color:#94a3b8;margin:6px 0 0}
 var done=false;
 function go(u){if(done||!u)return;done=true;location.replace(u);}
 
-var CANSLIM_JID = '019fc47e-6e3a-7e46-9dd0-0e6ba21dd170';
+// CF 固定域名（2026-08-03 主通道，永久不变）
+var CF_DOMAIN = 'https://canslim.alexzp1114.top';
+// jsonblob 兜底：CF 挂了时读免费隧道 URL
+var CANSLIM_JID = '019fbf57-7448-721b-8f42-972d8958e3ba';
 
-// 跳转 URL 获取：jsonblob 唯一优先源（实时，无 CDN 缓存），config.json 仅延迟兜底
-// 不再"谁快用谁"：config.json 被 GitHub Pages CDN 缓存 10 分钟，旧 URL 可能已 404
-function fetchUrl(jid){
-  return new Promise(function(resolve){
-    var got = false;
-    function done(u){ if(got) return; got = true; resolve(u); }
-    var ctrl = new AbortController();
-    setTimeout(function(){ ctrl.abort(); }, 6000);
-    fetch('https://jsonblob.com/api/jsonBlob/'+jid, {signal:ctrl.signal, cache:'no-store'})
+// 策略：CF 域名优先（1.5s 探测），失败走 jsonblob（6s）+ config.json 延迟兜底
+function tryCF(){
+  var ctrl = new AbortController();
+  setTimeout(function(){ ctrl.abort(); }, 1500);
+  fetch(CF_DOMAIN, {signal:ctrl.signal, cache:'no-store', mode:'no-cors'})
+    .then(function(){ go(CF_DOMAIN); })   // no-cors 拿不到状态码，能响应即视为可达
+    .catch(function(){ tryJsonblob(); });
+}
+function tryJsonblob(){
+  var got = false;
+  function done(u){ if(got) return; got = true; go(u); }
+  var ctrl = new AbortController();
+  setTimeout(function(){ ctrl.abort(); }, 6000);
+  fetch('https://jsonblob.com/api/jsonBlob/'+CANSLIM_JID, {signal:ctrl.signal, cache:'no-store'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if(d && d.url) done(d.url); })
+    .catch(function(){});
+  setTimeout(function(){
+    fetch('config.json', {cache:'no-store'})
       .then(function(r){ return r.json(); })
       .then(function(d){ if(d && d.url) done(d.url); })
       .catch(function(){});
-    // config.json 延迟兜底：jsonblob 超时后才读（CDN 缓存可能旧，仅作最后手段）
-    setTimeout(function(){
-      fetch('config.json', {cache:'no-store'})
-        .then(function(r){ return r.json(); })
-        .then(function(d){ if(d && d.url) done(d.url); })
-        .catch(function(){});
-    }, 6000);
-    setTimeout(function(){ done(null); }, 6500); // 防呆兜底
-  });
+  }, 6000);
+  setTimeout(function(){ done(null); }, 6500);
 }
 
-fetchUrl(CANSLIM_JID).then(function(u){
-  if(u){ go(u); return; }
-  document.querySelector('.container').innerHTML='<h1>CANSLIM</h1><p>服务暂不可用</p>';
-});
+tryCF();
 })();
 </script>
 </head>
