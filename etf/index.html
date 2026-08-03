@@ -20,26 +20,26 @@ function go(u){if(done||!u)return;done=true;location.replace(u);}
 
 var ETF_JID = '019fc2ef-a27b-7021-9165-ea048b068b2b';
 
-// 跳转 URL 获取：jsonblob 唯一优先源（实时，无 CDN 缓存），config.json 仅延迟兜底
-// 不再"谁快用谁"：config.json 被 GitHub Pages CDN 缓存 10 分钟，旧 URL 可能已 404
+// 跳转 URL 获取：jsonblob 主源（实时）+ config.json 并行兜底，谁先返回有效 URL 用谁
+// 修复：jsonblob 慢（实测 1-4s+）不应拖死跳转；config.json 立即并行发起，不再等 6s
 function fetchUrl(jid){
   return new Promise(function(resolve){
     var got = false;
     function done(u){ if(got) return; got = true; resolve(u); }
+    // jsonblob 主源（实时无缓存），8s 超时（比原 6s 放宽，给慢网络余地）
     var ctrl = new AbortController();
-    setTimeout(function(){ ctrl.abort(); }, 6000);
+    setTimeout(function(){ ctrl.abort(); }, 8000);
     fetch('https://jsonblob.com/api/jsonBlob/'+jid, {signal:ctrl.signal, cache:'no-store'})
       .then(function(r){ return r.json(); })
       .then(function(d){ if(d && d.url) done(d.url); })
       .catch(function(){});
-    // config.json 延迟兜底：jsonblob 超时后才读（CDN 缓存可能旧，仅作最后手段）
-    setTimeout(function(){
-      fetch('config.json', {cache:'no-store'})
-        .then(function(r){ return r.json(); })
-        .then(function(d){ if(d && d.url) done(d.url); })
-        .catch(function(){});
-    }, 6000);
-    setTimeout(function(){ done(null); }, 6500); // 防呆兜底
+    // config.json 并行兜底：立即发起（不再等 jsonblob 超时），
+    // 虽可能被 CDN 缓存旧 URL，但至少能跳转，404 刷新即可
+    fetch('config.json', {cache:'no-store'})
+      .then(function(r){ return r.json(); })
+      .then(function(d){ if(d && d.url) done(d.url); })
+      .catch(function(){});
+    setTimeout(function(){ done(null); }, 8500); // 总防呆兜底
   });
 }
 
