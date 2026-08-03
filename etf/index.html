@@ -18,35 +18,38 @@ p{font-size:.85rem;color:#94a3b8;margin:6px 0 0}
 var done=false;
 function go(u){if(done||!u)return;done=true;location.replace(u);}
 
+// CF 固定域名（2026-08-03 主通道，永久不变）
+var CF_DOMAIN = 'https://etf.alexzp1114.top';
+// jsonblob 兜底：CF 挂了时读免费隧道 URL
 var ETF_JID = '019fc2ef-a27b-7021-9165-ea048b068b2b';
 
-// 跳转 URL 获取：jsonblob 主源（实时）+ config.json 并行兜底，谁先返回有效 URL 用谁
-// 修复：jsonblob 慢（实测 1-4s+）不应拖死跳转；config.json 立即并行发起，不再等 6s
-function fetchUrl(jid){
-  return new Promise(function(resolve){
-    var got = false;
-    function done(u){ if(got) return; got = true; resolve(u); }
-    // jsonblob 主源（实时无缓存），8s 超时（比原 6s 放宽，给慢网络余地）
-    var ctrl = new AbortController();
-    setTimeout(function(){ ctrl.abort(); }, 8000);
-    fetch('https://jsonblob.com/api/jsonBlob/'+jid, {signal:ctrl.signal, cache:'no-store'})
-      .then(function(r){ return r.json(); })
-      .then(function(d){ if(d && d.url) done(d.url); })
-      .catch(function(){});
-    // config.json 并行兜底：立即发起（不再等 jsonblob 超时），
-    // 虽可能被 CDN 缓存旧 URL，但至少能跳转，404 刷新即可
+// 策略：CF 域名优先（1.5s 探测），失败走 jsonblob（6s）+ config.json 延迟兜底
+function tryCF(){
+  var ctrl = new AbortController();
+  setTimeout(function(){ ctrl.abort(); }, 1500);
+  fetch(CF_DOMAIN, {signal:ctrl.signal, cache:'no-store', mode:'no-cors'})
+    .then(function(){ go(CF_DOMAIN); })   // no-cors 拿不到状态码，能响应即视为可达
+    .catch(function(){ tryJsonblob(); });
+}
+function tryJsonblob(){
+  var got = false;
+  function done(u){ if(got) return; got = true; go(u); }
+  var ctrl = new AbortController();
+  setTimeout(function(){ ctrl.abort(); }, 6000);
+  fetch('https://jsonblob.com/api/jsonBlob/'+ETF_JID, {signal:ctrl.signal, cache:'no-store'})
+    .then(function(r){ return r.json(); })
+    .then(function(d){ if(d && d.url) done(d.url); })
+    .catch(function(){});
+  setTimeout(function(){
     fetch('config.json', {cache:'no-store'})
       .then(function(r){ return r.json(); })
       .then(function(d){ if(d && d.url) done(d.url); })
       .catch(function(){});
-    setTimeout(function(){ done(null); }, 8500); // 总防呆兜底
-  });
+  }, 6000);
+  setTimeout(function(){ done(null); }, 6500);
 }
 
-fetchUrl(ETF_JID).then(function(u){
-  if(u){ go(u); return; }
-  document.querySelector('.container').innerHTML='<h1>ETF 份额追踪</h1><p>服务暂不可用</p>';
-});
+tryCF();
 })();
 </script>
 </head>
