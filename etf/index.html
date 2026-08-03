@@ -3,57 +3,22 @@
 <head>
 <meta charset="UTF-8">
 <meta name="viewport" content="width=device-width, initial-scale=1.0">
-<title>ETF份额追踪</title>
+<title>宽基ETF</title>
 <link rel="icon" href="data:image/svg+xml,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 100 100'><text y='80' font-size='80'>📊</text></svg>">
 <style>
 body{font-family:-apple-system,BlinkMacSystemFont,sans-serif;display:flex;justify-content:center;align-items:center;min-height:100vh;margin:0;background:#0f172a;color:#e2e8f0}
 .container{text-align:center;max-width:400px;padding:20px}
-.spinner{border:3px solid #334155;border-top:3px solid #8b5cf6;border-radius:50%;width:40px;height:40px;animation:spin 1s linear infinite;margin:0 auto 20px}
+.spinner{border:3px solid #334155;border-top:3px solid #7c3aed;border-radius:50%;width:40px;height:40px;animation:spin 1s linear infinite;margin:0 auto 20px}
 @keyframes spin{to{transform:rotate(360deg)}}
 h1{font-size:1.3rem;color:#f8fafc;margin:0}
 p{font-size:.85rem;color:#94a3b8;margin:6px 0 0}
 </style>
 <script>
-(function(){
-var done=false;
-function go(u){if(done||!u)return;done=true;location.replace(u);}
-
-// CF 固定域名（2026-08-03 主通道，永久不变）
-var CF_DOMAIN = 'https://etf.alexzp1114.top';
-// jsonblob 兜底：CF 挂了时读免费隧道 URL
-var ETF_JID = '019fc2ef-a27b-7021-9165-ea048b068b2b';
-
-// 策略：CF 域名优先（1.5s 探测），失败走 jsonblob（6s）+ config.json 延迟兜底
-function tryCF(){
-  var ctrl = new AbortController();
-  setTimeout(function(){ ctrl.abort(); }, 1500);
-  fetch(CF_DOMAIN, {signal:ctrl.signal, cache:'no-store', mode:'no-cors'})
-    .then(function(){ go(CF_DOMAIN); })   // no-cors 拿不到状态码，能响应即视为可达
-    .catch(function(){ tryJsonblob(); });
-}
-function tryJsonblob(){
-  var got = false;
-  function done(u){ if(got) return; got = true; go(u); }
-  var ctrl = new AbortController();
-  setTimeout(function(){ ctrl.abort(); }, 6000);
-  fetch('https://jsonblob.com/api/jsonBlob/'+ETF_JID, {signal:ctrl.signal, cache:'no-store'})
-    .then(function(r){ return r.json(); })
-    .then(function(d){ if(d && d.url) done(d.url); })
-    .catch(function(){});
-  setTimeout(function(){
-    fetch('config.json', {cache:'no-store'})
-      .then(function(r){ return r.json(); })
-      .then(function(d){ if(d && d.url) done(d.url); })
-      .catch(function(){});
-  }, 6000);
-  setTimeout(function(){ done(null); }, 6500);
-}
-
-tryCF();
-})();
+// GitHub Pages 跳转页已退役（2026-08-03）：直接跳转 CF 固定域名
+location.replace('https://etf.alexzp1114.top');
 </script>
 </head>
 <body>
-<div class="container"><div class="spinner"></div><h1>ETF 份额追踪</h1><p>加载中...</p></div>
+<div class="container"><div class="spinner"></div><h1>宽基ETF</h1><p>跳转到 etf.alexzp1114.top...</p></div>
 </body>
 </html>
